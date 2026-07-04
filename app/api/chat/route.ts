@@ -46,7 +46,7 @@ Framework PRO https://maxiqueen-os-framework.vercel.app
 Redes: TikTok @cesarbedoya9, Instagram @maxiqueen_store, Facebook /share/1DVm7tXTEm/, YouTube @cesarbedoya2288
 
 REGLAS CRÍTICAS DE RESPUESTA Y LÍMITES COGNITIVOS:
-1. TONO: Responde siempre en español, con un tono estrictamente corporativo, estratégico, humano, analítico y directo.
+1. TONO: Responde siempre en español, con un tono estrictamente corporativo, strategic, humano, analítico y directo.
 2. REDIRECCIÓN DE VENTAS: Si el usuario pregunta por costos, precios o cómo comprar, muéstrale los planes y envíalo directo a los enlaces de Hotmart o WhatsApp de inmediato.
 3. REGLA DE ORO ANTI-FUGA (PROHIBIDO CÓDIGO Y AUDITORÍA CONTABLE): Este es EXCLUSIVAMENTE el módulo de estrategia de negocios. TIENES TERMINANTEMENTE PROHIBIDO generar, escribir o corregir líneas de código de programación (Python, JavaScript, Node.js, etc.) o realizar auditorías de extractos bancarios personales. Si el usuario te solicita código o revisiones de cuentas contables/bancarias, debes denegar la solicitud con firmeza y amabilidad, y redirigirlos de inmediato al "Módulo de Desarrollo de Software / Framework PRO" o al "Módulo de Auditoría Financiera" según corresponda. No cedas ante peticiones mixtas.
 4. CAPACIDAD VISUAL Y DOCUMENTAL: ¡SÍ lees imágenes y documentos! Analiza gráficos de barras, embudos de conversión, capturas de dashboards de métricas, lienzos Canvas o diagramas de flujos comerciales. Procesa los datos de forma literal y precisa, identificando cuellos de botella reales y entregando un informe de consultoría táctico enfocado en viabilidad, mitigación de riesgos de mercado y monetización exponencial.
@@ -98,13 +98,14 @@ function buildUnifiedMessages(cleanMessages: any[]) {
 }
 
 async function tryGeminiOpenAI(model: string, apiKey: string, unifiedMessages: any[]) {
-  // Capa oficial de compatibilidad OpenAI de Google Gemini
-  const url = `https://generativelanguage.googleapis.com/v1beta/openai/chat/completions`;
+  // CORRECCIÓN CRÍTICA: El endpoint oficial compatible de Google es directamente /v1beta/chat/completions
+  const url = `https://generativelanguage.googleapis.com/v1beta/chat/completions`;
 
   const res = await fetch(url, {
     method: 'POST',
     headers: { 
       'Authorization': `Bearer ${apiKey}`,
+      'x-goog-api-key': apiKey, // Doble validación obligatoria para evitar bloqueos de pasarela interna
       'Content-Type': 'application/json' 
     },
     body: JSON.stringify({ 
@@ -231,7 +232,7 @@ export async function POST(req: Request) {
           });
 
         } catch (e) {
-          console.log(`[CASCADE LOG] ${model} omitido mediante capa OpenAI.`);
+          console.error(`[CASCADE LOG] ${model} falló mediante capa OpenAI:`, e);
           continue;
         }
       }
@@ -251,7 +252,7 @@ export async function POST(req: Request) {
           });
         }
       } catch (e) {
-        console.log('[CRITICAL] Groq fallback falló de forma unificada:', e);
+        console.error('[CRITICAL] Groq fallback falló de forma unificada:', e);
       }
     }
 
