@@ -61,16 +61,15 @@ const GEMINI_KEYS = [
   process.env.GEMINI_API_KEY_3,
 ].filter(Boolean) as string[];
 
+// Modelos estandarizados de producción para optimizar la velocidad de la cascada
 const GEMINI_MODELS = [
-  'gemini-2.5-flash',
   'gemini-2.0-flash',
-  'gemini-1.5-pro',
-  'gemini-1.5-flash'
+  'gemini-1.5-flash',
+  'gemini-1.5-pro'
 ];
 
 const GROQ_KEY = process.env.GROQ_API_KEY_1 || process.env.GROQ_API_KEY;
 
-// Extractor dinámico avanzado de Mime-Type y Base64 para prevenir errores de payload
 function parseDataUri(dataUrl: string) {
   if (!dataUrl) return { mimeType: 'image/jpeg', base64Data: '' };
   const matches = dataUrl.match(/^data:(image\/[a-zA-Z+.-]+);base64,(.+)$/);
@@ -80,7 +79,6 @@ function parseDataUri(dataUrl: string) {
   return { mimeType: 'image/jpeg', base64Data: dataUrl };
 }
 
-// CORREGIDO: Mapeador adaptado con llaves camelCase requeridas por la API REST de Google
 function toGeminiContents(messages: any[]) {
   return messages.map((m: any) => ({
     role: m.role === 'assistant' ? 'model' : 'user',
@@ -103,7 +101,6 @@ function toGeminiContents(messages: any[]) {
   }));
 }
 
-// CORREGIDO: Garantiza que la imagen para Groq lleve siempre el prefijo Data URI correcto
 function toGroqMessages(messages: any[]) {
   return messages.map((m: any) => {
     const role = m.role === 'system' ? 'system' : (m.role === 'assistant' ? 'assistant' : 'user');
@@ -116,11 +113,7 @@ function toGroqMessages(messages: any[]) {
           return { type: 'text', text: c.text };
         }
         if (c.type === 'image_url') {
-          let url = c.image_url?.url || '';
-          if (url && !url.startsWith('data:') && !url.startsWith('http')) {
-            url = `data:image/jpeg;base64,${url}`;
-          }
-          return { type: 'image_url', image_url: { url } };
+          return { type: 'image_url', image_url: { url: c.image_url.url } };
         }
         return null;
       }).filter(Boolean);
@@ -203,6 +196,39 @@ export async function POST(req: Request) {
         typeof m.content === 'string' ||
         (Array.isArray(m.content) && m.content.length > 0)
       );
+
+    // [ESTRATEGIA EXCLUSIVA]: Interceptor asíncrono para resolver URLs relativas y externas a Base64 puro
+    for (const m of cleanMessages) {
+      if (Array.isArray(m.content)) {
+        for (const c of m.content) {
+          if (c.type === 'image_url' && c.image_url?.url) {
+            let targetUrl = c.image_url.url;
+
+            // Si es una ruta interna del servidor (/uploads/...), la acoplamos al host actual
+            if (targetUrl.startsWith('/')) {
+              const host = req.headers.get('host') || 'localhost:3000';
+              const protocol = host.includes('localhost') ? 'http' : 'https';
+              targetUrl = `${protocol}://${host}${targetUrl}`;
+            }
+
+            // Si es un enlace HTTP activo, descargamos los bytes y forzamos la conversión a Data URI
+            if (targetUrl.startsWith('http')) {
+              try {
+                const imgFetch = await fetch(targetUrl);
+                if (imgFetch.ok) {
+                  const arrayBuffer = await imgFetch.arrayBuffer();
+                  const contentType = imgFetch.headers.get('content-type') || 'image/png';
+                  const base64String = Buffer.from(arrayBuffer).toString('base64');
+                  c.image_url.url = `data:${contentType};base64,${base64String}`;
+                }
+              } catch (fetchErr) {
+                console.error("[IMAGE FETCH ERROR]: No se pudo transformar la URL a Base64:", fetchErr);
+              }
+            }
+          }
+        }
+      }
+    }
 
     const hasVision = cleanMessages.some((m: any) =>
       Array.isArray(m.content) && m.content.some((c: any) => c.type === 'image_url')
