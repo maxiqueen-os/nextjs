@@ -98,14 +98,14 @@ function buildUnifiedMessages(cleanMessages: any[]) {
 }
 
 async function tryGeminiOpenAI(model: string, apiKey: string, unifiedMessages: any[]) {
-  // CORRECCIÓN CRÍTICA: El endpoint oficial compatible de Google es directamente /v1beta/chat/completions
-  const url = `https://generativelanguage.googleapis.com/v1beta/chat/completions`;
+  // CORRECCIÓN DE VERDAD: La URL oficial de la capa OpenAI de Gemini SÍ requiere obligatoriamente "/openai/"
+  const url = `https://generativelanguage.googleapis.com/v1beta/openai/chat/completions`;
 
   const res = await fetch(url, {
     method: 'POST',
     headers: { 
       'Authorization': `Bearer ${apiKey}`,
-      'x-goog-api-key': apiKey, // Doble validación obligatoria para evitar bloqueos de pasarela interna
+      'x-goog-api-key': apiKey, // Doble header de seguridad para el gateway de Google
       'Content-Type': 'application/json' 
     },
     body: JSON.stringify({ 
@@ -214,7 +214,7 @@ export async function POST(req: Request) {
     // Generamos la estructura limpia una sola vez para ambos motores
     const unifiedMessages = buildUnifiedMessages(cleanMessages);
 
-    // 1. Cascada Primaria Inteligente: Gemini con interfaz nativa OpenAI Stream
+    // 1. Cascasa Primaria Inteligente: Gemini con interfaz nativa OpenAI Stream
     for (const model of GEMINI_MODELS) {
       for (const apiKey of GEMINI_KEYS) {
         try {
