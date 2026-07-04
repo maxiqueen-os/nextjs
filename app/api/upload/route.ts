@@ -37,6 +37,9 @@ export async function POST(req: NextRequest) {
     const buffer = Buffer.from(await file.arrayBuffer());
     const name = file.name.toLowerCase();
     let text = "";
+    
+    // Detectamos si es una imagen para gestionar el comportamiento al final del flujo
+    const isImage = name.endsWith(".png") || name.endsWith(".jpg") || name.endsWith(".jpeg") || name.endsWith(".webp");
 
     if (name.endsWith(".pdf")) {
       try {
@@ -64,17 +67,30 @@ export async function POST(req: NextRequest) {
     else if (name.endsWith(".txt")) {
       text = buffer.toString('utf-8');
     }
+    // ==========================================
+    // NUEVA SECCIÓN: SOPORTE DE IMÁGENES INTEGRADO
+    // ==========================================
+    else if (isImage) {
+      const extension = name.split('.').pop();
+      const mimeType = extension === 'png' ? 'image/png' : extension === 'webp' ? 'image/webp' : 'image/jpeg';
+      const base64Data = buffer.toString("base64");
+      
+      // Construimos el Data URL puro listo para usar en el frontend o enviar a la IA
+      text = `data:${mimeType};base64,${base64Data}`;
+    }
     else {
       return NextResponse.json({ 
-        error: 'Formato no soportado. Usa PDF, XLSX, XLS, DOCX o TXT.' 
+        error: 'Formato no soportado. Usa PDF, XLSX, XLS, DOCX, TXT, PNG, JPG o WEBP.' 
       }, { status: 415, headers: cors });
     }
 
     return NextResponse.json({ 
       success: true,
       filename: file.name,
-      text: text.slice(0, MAX_TEXT_LENGTH),
-      truncated: text.length > MAX_TEXT_LENGTH
+      // Si es imagen, NO recortamos los datos; si es texto ordinario, aplicamos tu límite habitual
+      text: isImage ? text : text.slice(0, MAX_TEXT_LENGTH),
+      truncated: isImage ? false : text.length > MAX_TEXT_LENGTH,
+      isImage: isImage
     }, { headers: cors });
     
   } catch (e: any) {
