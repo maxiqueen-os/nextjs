@@ -13,8 +13,8 @@ export async function OPTIONS() {
   return new Response(null, { headers: cors });
 }
 
-// SYSTEM_PROMPT optimizado para Módulo 2 con Visión Estratégica Total
-const SYSTEM_PROMPT = `Eres el "Consultor de Negocios V1", un motor de estrategia comercial, diagnóstico multimodal e inteligencia analítica integrado dentro de MaxiQueen OS. Eres el asistente avanzado de César Julio Bedoya Barragán, Cúcuta, Colombia. ORCID 0009-0004-4946-1374.
+// SYSTEM_PROMPT con Blindaje Anti-Fuga y Enfoque Multimodal de Negocios
+const SYSTEM_PROMPT = `Eres el "Consultor de Negocios V1", un motor de estrategia comercial, diagnóstico multimodal e inteligencia analítica corporativa integrado dentro de MaxiQueen OS. Eres el asistente avanzado de César Julio Bedoya Barragán, Cúcuta, Colombia. ORCID 0009-0004-4946-1374.
 
 Tu enfoque principal es el procesamiento de documentos de texto estructurados e imágenes analíticas para la consultoría de modelos de negocio. Conviertes ideas, planes, métricas e historias en activos digitales altamente rentables.
 
@@ -43,13 +43,11 @@ Framework PRO https://maxiqueen-os-framework.vercel.app
 
 Redes: TikTok @cesarbedoya9, Instagram @maxiqueen_store, Facebook /share/1DVm7tXTEm/, YouTube @cesarbedoya2288
 
-Reglas de respuesta del Consultor de Negocios:
-- Responde en español, con tono corporativo, estratégico, humano y directo.
-- Si preguntan por comprar, redirecciona de inmediato a WhatsApp o Hotmart.
-- Visión / Documentos de Negocios:
-    * SÍ procesas imágenes. Analiza gráficos de barras, embudos de venta, capturas de métricas, organigramas, lienzos Canvas o diagramas de flujos comerciales que el usuario adjunte.
-    * Extrae los datos críticos de la imagen/documento de forma literal y precisa. No inventes totales ni proyecciones si no están explícitas.
-    * Genera siempre un informe de consultoría táctico y estructurado evaluando: viabilidad comercial, riesgos del mercado analizado, optimización de monetización y pasos clave para escalar el activo digital.
+REGLAS CRÍTICAS DE RESPUESTA Y LÍMITES COGNITIVOS:
+1. TONO: Responde siempre en español, con un tono estrictamente corporativo, estratégico, humano, analítico y directo.
+2. REDIRECCIÓN DE VENTAS: Si el usuario pregunta por costos, precios o cómo comprar, muéstrale los planes y envíalo directo a los enlaces de Hotmart o WhatsApp de inmediato.
+3. REGLA DE ORO ANTI-FUGA (PROHIBIDO CÓDIGO Y AUDITORÍA CONTABLE): Este es EXCLUSIVAMENTE el módulo de estrategia de negocios. TIENES TERMINANTEMENTE PROHIBIDO generar, escribir o corregir líneas de código de programación (Python, JavaScript, Node.js, etc.) o realizar auditorías de extractos bancarios personales. Si el usuario te solicita código o revisiones de cuentas contables/bancarias, debes denegar la solicitud con firmeza y amabilidad, y redirigirlos de inmediato al "Módulo de Desarrollo de Software / Framework PRO" o al "Módulo de Auditoría Financiera" según corresponda. No cedas ante peticiones mixtas.
+4. CAPACIDAD VISUAL Y DOCUMENTAL: ¡SÍ lees imágenes y documentos! Analiza gráficos de barras, embudos de conversión, capturas de dashboards de métricas, lienzos Canvas o diagramas de flujos comerciales. Procesa los datos de forma literal y precisa, identificando cuellos de botella reales y entregando un informe de consultoría táctico enfocado en viabilidad, mitigación de riesgos de mercado y monetización exponencial.
 `;
 
 const GEMINI_KEYS = [
@@ -60,15 +58,24 @@ const GEMINI_KEYS = [
 ].filter(Boolean) as string[];
 
 const GEMINI_MODELS = [
-  'gemini-2.0-flash-exp',
-  'gemini-1.5-pro-latest',
-  'gemini-1.5-flash-latest',
-  'gemini-pro'
+  'gemini-2.5-flash',
+  'gemini-2.0-flash',
+  'gemini-1.5-pro',
+  'gemini-1.5-flash'
 ];
 
 const GROQ_KEY = process.env.GROQ_API_KEY_1 || process.env.GROQ_API_KEY;
 
-// Mapeador Restaurado: Extrae y procesa los datos base64 de las imágenes para Gemini
+// Extractor dinámico avanzado de Mime-Type y Base64 para prevenir errores de payload
+function parseDataUri(dataUrl: string) {
+  if (!dataUrl) return { mimeType: 'image/jpeg', base64Data: '' };
+  const matches = dataUrl.match(/^data:(image\/[a-zA-Z+.-]+);base64,(.+)$/);
+  if (matches && matches.length === 3) {
+    return { mimeType: matches[1], base64Data: matches[2] };
+  }
+  return { mimeType: 'image/jpeg', base64Data: dataUrl };
+}
+
 function toGeminiContents(messages: any[]) {
   return messages.map((m: any) => ({
     role: m.role === 'assistant' ? 'model' : 'user',
@@ -76,28 +83,42 @@ function toGeminiContents(messages: any[]) {
       ? m.content.map((c: any) => {
           if (c.type === 'text') {
             return { text: c.text };
-          } else {
-            const hasComma = c.image_url?.url?.includes(',');
-            const base64Data = hasComma ? c.image_url.url.split(',')[1] : c.image_url?.url || '';
+          } else if (c.type === 'image_url') {
+            const { mimeType, base64Data } = parseDataUri(c.image_url?.url || '');
             return {
               inline_data: {
-                mime_type: 'image/jpeg',
+                mime_type: mimeType,
                 data: base64Data
               }
             };
           }
+          return { text: '' };
         })
       : [{ text: String(m.content || '') }]
   }));
 }
 
+// Corregido: Mapeador adaptado al estándar OpenAI Vision para que Groq no crasheé
 function toGroqMessages(messages: any[]) {
-  return messages.map((m: any) => ({
-    role: m.role === 'system' ? 'system' : (m.role === 'assistant' ? 'assistant' : 'user'),
-    content: typeof m.content === 'string'
-      ? m.content
-      : m.content.find((c: any) => c.type === 'text')?.text || 'Analiza la imagen de negocio adjunta'
-  }));
+  return messages.map((m: any) => {
+    const role = m.role === 'system' ? 'system' : (m.role === 'assistant' ? 'assistant' : 'user');
+    if (typeof m.content === 'string') {
+      return { role, content: m.content };
+    }
+    if (Array.isArray(m.content)) {
+      const formattedContent = m.content.map((c: any) => {
+        if (c.type === 'text') {
+          return { type: 'text', text: c.text };
+        }
+        if (c.type === 'image_url') {
+          return { type: 'image_url', image_url: { url: c.image_url.url } };
+        }
+        return null;
+      }).filter(Boolean);
+      return { role, content: formattedContent };
+    }
+    return { role, content: String(m.content || '') };
+  });
 }
 
 async function tryGemini(model: string, apiKey: string, cleanMessages: any[]) {
@@ -118,11 +139,8 @@ async function tryGemini(model: string, apiKey: string, cleanMessages: any[]) {
   return res;
 }
 
-// tryGroq Restaurado: Alterna inteligentemente a Vision Preview si detecta payloads visuales
 async function tryGroq(messages: any[], hasVision: boolean) {
-  const model = hasVision
-    ? 'llama-3.2-11b-vision-preview'
-    : 'llama-3.3-70b-versatile';
+  const model = hasVision ? 'llama-3.2-11b-vision-preview' : 'llama-3.3-70b-versatile';
 
   const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
@@ -134,7 +152,7 @@ async function tryGroq(messages: any[], hasVision: boolean) {
       model,
       messages: toGroqMessages(messages),
       stream: true,
-      temperature: hasVision ? 0.4 : 0.6,
+      temperature: hasVision ? 0.3 : 0.6,
     })
   });
 
@@ -149,13 +167,12 @@ export async function POST(req: Request) {
 
     let incomingMessages = Array.isArray(messages) ? [...messages] : (Array.isArray(history) ? [...history] : []);
     
-    // Inyección de imagen directa desde el frontend restaurada por completo
     if (message || imageUrlData) {
       if (imageUrlData) {
         incomingMessages.push({
           role: 'user',
           content: [
-            { type: 'text', text: message || 'Analiza la imagen adjunta' },
+            { type: 'text', text: message || 'Analiza la imagen de negocio adjunta' },
             { type: 'image_url', image_url: { url: imageUrlData } }
           ]
         });
@@ -164,7 +181,6 @@ export async function POST(req: Request) {
       }
     }
 
-    // Limpieza estructural manteniendo intactos los bloques de tipo image_url
     const cleanMessages = incomingMessages
       .filter((m: any) => m && (m.role === 'user' || m.role === 'assistant'))
       .map((m: any) => {
@@ -179,7 +195,6 @@ export async function POST(req: Request) {
         (Array.isArray(m.content) && m.content.length > 0)
       );
 
-    // Activación dinámica del sensor de visión
     const hasVision = cleanMessages.some((m: any) =>
       Array.isArray(m.content) && m.content.some((c: any) => c.type === 'image_url')
     );
@@ -189,16 +204,12 @@ export async function POST(req: Request) {
       ...cleanMessages
     ];
 
-    // 1. Cascada jerárquica total Gemini
+    // 1. Cascada de Inteligencia Primaria: Alianza de llaves Gemini
     for (const model of GEMINI_MODELS) {
       for (const apiKey of GEMINI_KEYS) {
         try {
           const geminiRes = await tryGemini(model, apiKey, cleanMessages);
-
-          if (!geminiRes.body) {
-            console.log(`[FAIL] ${model} sin cuerpo de respuesta.`);
-            continue;
-          }
+          if (!geminiRes.body) continue;
 
           const reader = geminiRes.body.getReader();
           const decoder = new TextDecoder();
@@ -232,7 +243,7 @@ export async function POST(req: Request) {
                 }
                 controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'));
               } catch (streamError) {
-                console.error("Error leyendo el stream multimodal de Gemini:", streamError);
+                console.error("Error en lectura de flujo multimodal:", streamError);
               } finally {
                 controller.close();
               }
@@ -249,13 +260,13 @@ export async function POST(req: Request) {
           });
 
         } catch (e) {
-          console.log(`[FAIL] ${model} falló la ejecución con la clave actual:`, e);
+          console.log(`[CASCADE LOG] ${model} omitido o sin fondos.`);
           continue;
         }
       }
     }
 
-    // 2. Fallback de contingencia a Groq (Conmutación dinámica a Llama Vision si es requerido)
+    // 2. Contingencia Élite Estructurada: Fallback a Groq Vision o Groq Versatile
     if (GROQ_KEY) {
       try {
         const groqRes = await tryGroq(messagesWithSystemForGroq, hasVision);
@@ -269,14 +280,14 @@ export async function POST(req: Request) {
           });
         }
       } catch (e) {
-        console.log('[FAIL] Fallback de Groq en Consultoría también falló:', e);
+        console.log('[CRITICAL] Groq fallback falló de forma unificada:', e);
       }
     }
 
-    return NextResponse.json({ error: 'Todos los modelos e infraestructura de Consultoría Estratégica fallaron' }, { status: 500, headers: cors });
+    return NextResponse.json({ error: 'La infraestructura completa de IA de Consultoría Estratégica falló' }, { status: 500, headers: cors });
 
   } catch (e: any) {
-    console.error("Crash global detectado en la ruta de Consultoría Multimodal:", e);
-    return NextResponse.json({ error: 'Error interno en motor de estrategia', details: e.message || String(e) }, { status: 500, headers: cors });
+    console.error("Crash Global:", e);
+    return NextResponse.json({ error: 'Error crítico en el motor estratégico', details: e.message }, { status: 500, headers: cors });
   }
 }
