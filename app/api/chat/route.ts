@@ -15,7 +15,7 @@ export async function OPTIONS() {
   return new Response(null, { headers: cors });
 }
 
-// SYSTEM_PROMPT con Blindaje Anti-Fuga y Enfoque Multimodal de Negocios (Preservado 100% como respaldo local)
+// SYSTEM_PROMPT con Blindaje Anti-Fuga y Enfoque Multimodal de Negocios
 const LOCAL_SYSTEM_PROMPT = `Eres el "Consultor de Negocios V1", un motor de estrategia comercial, diagnóstico multimodal e inteligencia analítica corporativa integrado dentro de MaxiQueen OS. Eres el asistente avanzado de César Julio Bedoya Barragán, Cúcuta, Colombia. ORCID 0009-0004-4946-1374.
 
 Tu enfoque principal es el procesamiento de documentos de texto estructurados e imágenes analíticas para la consultoría de modelos de negocio. Conviertes ideas, planes, métricas e historias en activos digitales altamente rentables.
@@ -61,7 +61,6 @@ const GEMINI_KEYS = [
   process.env.GEMINI_API_KEY_3,
 ].filter(Boolean) as string[];
 
-// Modelos estandarizados de producción para optimizar la velocidad de la cascada
 const GEMINI_MODELS = [
   'gemini-2.0-flash',
   'gemini-1.5-flash',
@@ -70,78 +69,57 @@ const GEMINI_MODELS = [
 
 const GROQ_KEY = process.env.GROQ_API_KEY_1 || process.env.GROQ_API_KEY;
 
-function parseDataUri(dataUrl: string) {
-  if (!dataUrl) return { mimeType: 'image/jpeg', base64Data: '' };
-  const matches = dataUrl.match(/^data:(image\/[a-zA-Z+.-]+);base64,(.+)$/);
-  if (matches && matches.length === 3) {
-    return { mimeType: matches[1], base64Data: matches[2] };
-  }
-  return { mimeType: 'image/jpeg', base64Data: dataUrl };
-}
+// Construye un formato unificado compatible con OpenAI tanto para Gemini como para Groq
+function buildUnifiedMessages(cleanMessages: any[]) {
+  const formatted = [
+    { role: 'system', content: SYSTEM_PROMPT }
+  ];
 
-function toGeminiContents(messages: any[]) {
-  return messages.map((m: any) => ({
-    role: m.role === 'assistant' ? 'model' : 'user',
-    parts: Array.isArray(m.content)
-      ? m.content.map((c: any) => {
-          if (c.type === 'text') {
-            return { text: c.text };
-          } else if (c.type === 'image_url') {
-            const { mimeType, base64Data } = parseDataUri(c.image_url?.url || '');
-            return {
-              inlineData: {
-                mimeType: mimeType,
-                data: base64Data
-              }
-            };
-          }
-          return { text: '' };
-        })
-      : [{ text: String(m.content || '') }]
-  }));
-}
-
-function toGroqMessages(messages: any[]) {
-  return messages.map((m: any) => {
-    const role = m.role === 'system' ? 'system' : (m.role === 'assistant' ? 'assistant' : 'user');
+  for (const m of cleanMessages) {
+    const role = m.role === 'assistant' ? 'assistant' : 'user';
     if (typeof m.content === 'string') {
-      return { role, content: m.content };
-    }
-    if (Array.isArray(m.content)) {
-      const formattedContent = m.content.map((c: any) => {
+      formatted.push({ role, content: m.content });
+    } else if (Array.isArray(m.content)) {
+      const contentArray = m.content.map((c: any) => {
         if (c.type === 'text') {
           return { type: 'text', text: c.text };
         }
-        if (c.type === 'image_url') {
+        if (c.type === 'image_url' && c.image_url?.url) {
           return { type: 'image_url', image_url: { url: c.image_url.url } };
         }
         return null;
       }).filter(Boolean);
-      return { role, content: formattedContent };
+      formatted.push({ role, content: contentArray as any });
+    } else {
+      formatted.push({ role, content: String(m.content || '') });
     }
-    return { role, content: String(m.content || '') };
-  });
+  }
+  return formatted;
 }
 
-async function tryGemini(model: string, apiKey: string, cleanMessages: any[]) {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?key=${apiKey}&alt=sse`;
+async function tryGeminiOpenAI(model: string, apiKey: string, unifiedMessages: any[]) {
+  // Capa oficial de compatibilidad OpenAI de Google Gemini
+  const url = `https://generativelanguage.googleapis.com/v1beta/openai/chat/completions`;
 
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json' 
+    },
     body: JSON.stringify({ 
-      contents: toGeminiContents(cleanMessages),
-      systemInstruction: {
-        parts: [{ text: SYSTEM_PROMPT }]
-      }
+      model,
+      messages: unifiedMessages,
+      stream: true,
+      temperature: 0.4
     })
   });
 
-  if (!res.ok) throw new Error(`Gemini ${model} ${res.status}`);
+  if (!res.ok) throw new Error(`Gemini OpenAI Layer ${model} ${res.status}`);
   return res;
 }
 
-async function tryGroq(messages: any[], hasVision: boolean) {
+async function tryGroq(unifiedMessages: any[], hasVision: boolean) {
   const model = hasVision ? 'llama-3.2-11b-vision-preview' : 'llama-3.3-70b-versatile';
 
   const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -152,7 +130,7 @@ async function tryGroq(messages: any[], hasVision: boolean) {
     },
     body: JSON.stringify({
       model,
-      messages: toGroqMessages(messages),
+      messages: unifiedMessages,
       stream: true,
       temperature: hasVision ? 0.3 : 0.6,
     })
@@ -197,21 +175,19 @@ export async function POST(req: Request) {
         (Array.isArray(m.content) && m.content.length > 0)
       );
 
-    // [ESTRATEGIA EXCLUSIVA]: Interceptor asíncrono para resolver URLs relativas y externas a Base64 puro
+    // Interceptor asíncrono para resolver URLs relativas y externas a Base64 puro
     for (const m of cleanMessages) {
       if (Array.isArray(m.content)) {
         for (const c of m.content) {
           if (c.type === 'image_url' && c.image_url?.url) {
             let targetUrl = c.image_url.url;
 
-            // Si es una ruta interna del servidor (/uploads/...), la acoplamos al host actual
             if (targetUrl.startsWith('/')) {
               const host = req.headers.get('host') || 'localhost:3000';
               const protocol = host.includes('localhost') ? 'http' : 'https';
               targetUrl = `${protocol}://${host}${targetUrl}`;
             }
 
-            // Si es un enlace HTTP activo, descargamos los bytes y forzamos la conversión a Data URI
             if (targetUrl.startsWith('http')) {
               try {
                 const imgFetch = await fetch(targetUrl);
@@ -234,58 +210,18 @@ export async function POST(req: Request) {
       Array.isArray(m.content) && m.content.some((c: any) => c.type === 'image_url')
     );
 
-    const messagesWithSystemForGroq = [
-      { role: 'system', content: SYSTEM_PROMPT },
-      ...cleanMessages
-    ];
+    // Generamos la estructura limpia una sola vez para ambos motores
+    const unifiedMessages = buildUnifiedMessages(cleanMessages);
 
-    // 1. Cascada de Inteligencia Primaria: Alianza de llaves Gemini
+    // 1. Cascada Primaria Inteligente: Gemini con interfaz nativa OpenAI Stream
     for (const model of GEMINI_MODELS) {
       for (const apiKey of GEMINI_KEYS) {
         try {
-          const geminiRes = await tryGemini(model, apiKey, cleanMessages);
+          const geminiRes = await tryGeminiOpenAI(model, apiKey, unifiedMessages);
           if (!geminiRes.body) continue;
 
-          const reader = geminiRes.body.getReader();
-          const decoder = new TextDecoder();
-
-          const stream = new ReadableStream({
-            async start(controller) {
-              let buffer = '';
-              try {
-                while (true) {
-                  const { done, value } = await reader.read();
-                  if (done) break;
-                  
-                  buffer += decoder.decode(value, { stream: true });
-                  const lines = buffer.split('\n');
-                  buffer = lines.pop() || '';
-
-                  for (const line of lines) {
-                    if (!line.startsWith('data: ')) continue;
-                    const data = line.slice(6).trim();
-                    if (data === '[DONE]') continue;
-                    
-                    try {
-                      const json = JSON.parse(data);
-                      const text = json.candidates?.[0]?.content?.parts?.[0]?.text || '';
-                      if (text) {
-                        const chunk = `data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\n`;
-                        controller.enqueue(new TextEncoder().encode(chunk));
-                      }
-                    } catch {}
-                  }
-                }
-                controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'));
-              } catch (streamError) {
-                console.error("Error en lectura de flujo multimodal:", streamError);
-              } finally {
-                controller.close();
-              }
-            }
-          });
-
-          return new Response(stream, {
+          // Retornamos directamente el stream compatible sin procesamiento manual destructivo
+          return new Response(geminiRes.body, {
             headers: {
               ...cors,
               'Content-Type': 'text/event-stream; charset=utf-8',
@@ -295,16 +231,16 @@ export async function POST(req: Request) {
           });
 
         } catch (e) {
-          console.log(`[CASCADE LOG] ${model} omitido o sin fondos.`);
+          console.log(`[CASCADE LOG] ${model} omitido mediante capa OpenAI.`);
           continue;
         }
       }
     }
 
-    // 2. Contingencia Élite Estructurada: Fallback a Groq Vision o Groq Versatile
+    // 2. Contingencia de Respaldo: Groq
     if (GROQ_KEY) {
       try {
-        const groqRes = await tryGroq(messagesWithSystemForGroq, hasVision);
+        const groqRes = await tryGroq(unifiedMessages, hasVision);
         if (groqRes.body) {
           return new Response(groqRes.body, {
             headers: {
