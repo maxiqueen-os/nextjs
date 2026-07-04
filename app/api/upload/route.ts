@@ -84,10 +84,15 @@ export async function POST(req: NextRequest) {
       text = buffer.toString('utf-8');
     }
     else if (isImage) {
+      // Extracción limpia y segura de la extensión real
       const extension = name.split('.').pop();
-      const mimeType = extension === 'png' ? 'image/png' : extension === 'webp' ? 'image/webp' : 'image/jpeg';
-      const base64Data = buffer.toString("base64");
+      let mimeType = 'image/jpeg'; // Fallback por defecto
+
+      if (extension === 'png') mimeType = 'image/png';
+      else if (extension === 'webp') mimeType = 'image/webp';
+      else if (extension === 'jpg' || extension === 'jpeg') mimeType = 'image/jpeg';
       
+      const base64Data = buffer.toString("base64");
       text = `data:${mimeType};base64,${base64Data}`;
     }
     else {
@@ -96,10 +101,11 @@ export async function POST(req: NextRequest) {
       }, { status: 415, headers: cors });
     }
 
-    // Respuesta unificada garantizando estabilidad
+    // Respuesta unificada garantizando estabilidad absoluta
     return NextResponse.json({ 
       success: true,
       filename: file.name,
+      // Si es imagen, enviamos el Base64 completo intacto, de lo contrario aplicamos el límite de texto
       text: isImage ? text : text.slice(0, MAX_TEXT_LENGTH),
       truncated: isImage ? false : text.length > MAX_TEXT_LENGTH,
       isImage: isImage
