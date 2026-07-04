@@ -4,7 +4,8 @@ import * as mammoth from "mammoth";
 
 export const runtime = "nodejs";
 export const dynamic = 'force-dynamic';
-export const maxDuration = 10; 
+// Subimos a 30 segundos para evitar Timeouts procesando archivos pesados o Base64 extensos
+export const maxDuration = 30; 
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -16,7 +17,9 @@ export async function OPTIONS() {
   return new Response(null, { headers: cors });
 }
 
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+// NOTA: Si estás en Vercel Serverless, el límite real de la plataforma es 4.5MB. 
+// Ajustamos a 4.5MB para evitar que Vercel rompa la app de forma externa.
+const MAX_FILE_SIZE = 4.5 * 1024 * 1024; 
 const MAX_TEXT_LENGTH = 12000;
 
 export async function POST(req: NextRequest) {
@@ -30,7 +33,7 @@ export async function POST(req: NextRequest) {
 
     if (file.size > MAX_FILE_SIZE) {
       return NextResponse.json({ 
-        error: `El archivo supera el límite de 10MB.` 
+        error: `El archivo supera el límite permitido de 4.5MB para procesamiento estable.` 
       }, { status: 413, headers: cors });
     }
 
@@ -38,12 +41,15 @@ export async function POST(req: NextRequest) {
     const name = file.name.toLowerCase();
     let text = "";
     
-    // Detectamos si es una imagen para gestionar el comportamiento al final del flujo
     const isImage = name.endsWith(".png") || name.endsWith(".jpg") || name.endsWith(".jpeg") || name.endsWith(".webp");
 
     if (name.endsWith(".pdf")) {
       try {
-        const pdfParse = (await import("pdf-parse")).default;
+        // Importación dinámica limpia
+        const pdfParseModule = await import("pdf-parse");
+        // Algunas versiones requieren acceder a .default, otras directo al módulo
+        const pdfParse = pdfParseModule.default || pdfParseModule;
+        
         const parsed = await pdfParse(buffer);
         text = parsed.text || "";
       } catch (pdfError: any) {
@@ -55,27 +61,33 @@ export async function POST(req: NextRequest) {
       }
     } 
     else if (name.endsWith(".xlsx") || name.endsWith(".xls")) {
-      const wb = XLSX.read(buffer, { type: "buffer" });
-      text = wb.SheetNames
-        .map((n: string) => `### Hoja: ${n}\n${XLSX.utils.sheet_to_csv(wb.Sheets[n])}`)
-        .join("\n\n");
+      try {
+        const wb = XLSX.read(buffer, { type: "buffer" });
+        text = wb.SheetNames
+          .map((n: string) => `### Hoja: ${n}\n${XLSX.utils.sheet_to_csv(wb.Sheets[n])}`)
+          .join("\n\n");
+      } catch (xlsxError: any) {
+        console.error("Error en XLSX:", xlsxError);
+        return NextResponse.json({ error: 'Error al procesar el archivo Excel.', details: xlsxError.message }, { status: 500, headers: cors });
+      }
     } 
     else if (name.endsWith(".docx")) {
-      const result = await mammoth.extractRawText({ buffer });
-      text = result.value;
+      try {
+        const result = await mammoth.extractRawText({ buffer });
+        text = result.value;
+      } catch (docxError: any) {
+        console.error("Error en DOCX:", docxError);
+        return NextResponse.json({ error: 'Error al procesar el archivo Word.', details: docxError.message }, { status: 500, headers: cors });
+      }
     }
     else if (name.endsWith(".txt")) {
       text = buffer.toString('utf-8');
     }
-    // ==========================================
-    // NUEVA SECCIÓN: SOPORTE DE IMÁGENES INTEGRADO
-    // ==========================================
     else if (isImage) {
       const extension = name.split('.').pop();
       const mimeType = extension === 'png' ? 'image/png' : extension === 'webp' ? 'image/webp' : 'image/jpeg';
       const base64Data = buffer.toString("base64");
       
-      // Construimos el Data URL puro listo para usar en el frontend o enviar a la IA
       text = `data:${mimeType};base64,${base64Data}`;
     }
     else {
@@ -84,10 +96,10 @@ export async function POST(req: NextRequest) {
       }, { status: 415, headers: cors });
     }
 
+    // Respuesta unificada garantizando estabilidad
     return NextResponse.json({ 
       success: true,
       filename: file.name,
-      // Si es imagen, NO recortamos los datos; si es texto ordinario, aplicamos tu límite habitual
       text: isImage ? text : text.slice(0, MAX_TEXT_LENGTH),
       truncated: isImage ? false : text.length > MAX_TEXT_LENGTH,
       isImage: isImage
@@ -96,7 +108,7 @@ export async function POST(req: NextRequest) {
   } catch (e: any) {
     console.error('Error general de parseo:', e);
     return NextResponse.json({ 
-      error: 'Error al procesar el archivo', 
+      error: 'Error crítico al procesar el archivo', 
       details: e.message 
     }, { status: 500, headers: cors });
   }
