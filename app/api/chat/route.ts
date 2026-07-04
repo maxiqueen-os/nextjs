@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+// Importación modular para conectar con la factoría central de prompts
+import { BUSINESS_CONSULTANT_PROMPT } from "../../../core/prompt/businessConfig";
 
 export const runtime = 'nodejs'; 
 export const dynamic = 'force-dynamic';
@@ -13,8 +15,8 @@ export async function OPTIONS() {
   return new Response(null, { headers: cors });
 }
 
-// SYSTEM_PROMPT con Blindaje Anti-Fuga y Enfoque Multimodal de Negocios
-const SYSTEM_PROMPT = `Eres el "Consultor de Negocios V1", un motor de estrategia comercial, diagnóstico multimodal e inteligencia analítica corporativa integrado dentro de MaxiQueen OS. Eres el asistente avanzado de César Julio Bedoya Barragán, Cúcuta, Colombia. ORCID 0009-0004-4946-1374.
+// SYSTEM_PROMPT con Blindaje Anti-Fuga y Enfoque Multimodal de Negocios (Preservado 100% como respaldo local)
+const LOCAL_SYSTEM_PROMPT = `Eres el "Consultor de Negocios V1", un motor de estrategia comercial, diagnóstico multimodal e inteligencia analítica corporativa integrado dentro de MaxiQueen OS. Eres el asistente avanzado de César Julio Bedoya Barragán, Cúcuta, Colombia. ORCID 0009-0004-4946-1374.
 
 Tu enfoque principal es el procesamiento de documentos de texto estructurados e imágenes analíticas para la consultoría de modelos de negocio. Conviertes ideas, planes, métricas e historias en activos digitales altamente rentables.
 
@@ -50,6 +52,8 @@ REGLAS CRÍTICAS DE RESPUESTA Y LÍMITES COGNITIVOS:
 4. CAPACIDAD VISUAL Y DOCUMENTAL: ¡SÍ lees imágenes y documentos! Analiza gráficos de barras, embudos de conversión, capturas de dashboards de métricas, lienzos Canvas o diagramas de flujos comerciales. Procesa los datos de forma literal y precisa, identificando cuellos de botella reales y entregando un informe de consultoría táctico enfocado en viabilidad, mitigación de riesgos de mercado y monetización exponencial.
 `;
 
+const SYSTEM_PROMPT = BUSINESS_CONSULTANT_PROMPT || LOCAL_SYSTEM_PROMPT;
+
 const GEMINI_KEYS = [
   process.env.GEMINI_API_KEY,
   process.env.GEMINI_API_KEY_1,
@@ -76,6 +80,7 @@ function parseDataUri(dataUrl: string) {
   return { mimeType: 'image/jpeg', base64Data: dataUrl };
 }
 
+// CORREGIDO: Mapeador adaptado con llaves camelCase requeridas por la API REST de Google
 function toGeminiContents(messages: any[]) {
   return messages.map((m: any) => ({
     role: m.role === 'assistant' ? 'model' : 'user',
@@ -86,8 +91,8 @@ function toGeminiContents(messages: any[]) {
           } else if (c.type === 'image_url') {
             const { mimeType, base64Data } = parseDataUri(c.image_url?.url || '');
             return {
-              inline_data: {
-                mime_type: mimeType,
+              inlineData: {
+                mimeType: mimeType,
                 data: base64Data
               }
             };
@@ -98,7 +103,7 @@ function toGeminiContents(messages: any[]) {
   }));
 }
 
-// Corregido: Mapeador adaptado al estándar OpenAI Vision para que Groq no crasheé
+// CORREGIDO: Garantiza que la imagen para Groq lleve siempre el prefijo Data URI correcto
 function toGroqMessages(messages: any[]) {
   return messages.map((m: any) => {
     const role = m.role === 'system' ? 'system' : (m.role === 'assistant' ? 'assistant' : 'user');
@@ -111,7 +116,11 @@ function toGroqMessages(messages: any[]) {
           return { type: 'text', text: c.text };
         }
         if (c.type === 'image_url') {
-          return { type: 'image_url', image_url: { url: c.image_url.url } };
+          let url = c.image_url?.url || '';
+          if (url && !url.startsWith('data:') && !url.startsWith('http')) {
+            url = `data:image/jpeg;base64,${url}`;
+          }
+          return { type: 'image_url', image_url: { url } };
         }
         return null;
       }).filter(Boolean);
