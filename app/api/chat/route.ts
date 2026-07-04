@@ -34,7 +34,7 @@ Pagos:
 - WhatsApp: https://wa.me/573016625921
 
 Módulos del Ecosistema:
-OS v1 https://maxiqueen-os.vercel.app
+OS v1 https://maxiqueen-os-v2.vercel.app
 OS v2 https://maxiqueen-os-v2.vercel.app
 System https://system-maxi-queen-os.vercel.app
 App https://maxiqueen-os-app.vercel.app
@@ -98,7 +98,6 @@ function buildUnifiedMessages(cleanMessages: any[]) {
 }
 
 async function tryGeminiOpenAI(model: string, apiKey: string, unifiedMessages: any[]) {
-  // CORRECCIÓN DE VERDAD: La URL oficial de la capa OpenAI de Gemini SÍ requiere obligatoriamente "/openai/"
   const url = `https://generativelanguage.googleapis.com/v1beta/openai/chat/completions`;
 
   const res = await fetch(url, {
@@ -123,6 +122,58 @@ async function tryGeminiOpenAI(model: string, apiKey: string, unifiedMessages: a
 async function tryGroq(unifiedMessages: any[], hasVision: boolean) {
   const model = hasVision ? 'llama-3.2-11b-vision-preview' : 'llama-3.3-70b-versatile';
 
+  let finalMessages = [...unifiedMessages];
+
+  // CORRECCIÓN CRÍTICA PARA MODELOS MULTIMODALES EN GROQ:
+  // Llama 3.2 Vision NO tolera mensajes con role: 'system'.
+  if (hasVision) {
+    // 1. Localizar y extraer el contenido del prompt del sistema
+    const systemMessage = finalMessages.find(m => m.role === 'system');
+    const systemContent = systemMessage ? systemMessage.content : '';
+    
+    // 2. Filtrar el array para remover por completo el nodo de rol system
+    finalMessages = finalMessages.filter(m => m.role !== 'system');
+
+    // 3. Inyectar el prompt extraído dentro del primer mensaje del usuario
+    const firstUserIndex = finalMessages.findIndex(m => m.role === 'user');
+    if (firstUserIndex !== -1) {
+      const firstUser = finalMessages[firstUserIndex];
+      
+      if (typeof firstUser.content === 'string') {
+        finalMessages[firstUserIndex] = {
+          role: 'user',
+          content: `[INSTRUCCIONES DEL SISTEMA DE CONTEXTO]\n${systemContent}\n\n[SOLICITUD DEL USUARIO]\n${firstUser.content}`
+        };
+      } else if (Array.isArray(firstUser.content)) {
+        // Corrección del Edge Case si el primer mensaje de usuario no contiene un nodo previo de texto
+        let textFound = false;
+        const updatedContent = firstUser.content.map((c: any) => {
+          if (c.type === 'text') {
+            textFound = true;
+            return { 
+              type: 'text', 
+              text: `[INSTRUCCIONES DEL SISTEMA DE CONTEXTO]\n${systemContent}\n\n[SOLICITUD DEL USUARIO]\n${c.text}` 
+            };
+          }
+          return c;
+        });
+
+        // Si el arreglo contenía solo imágenes, forzamos la inyección del System Prompt en la primera posición
+        if (!textFound) {
+          updatedContent.unshift({
+            type: 'text',
+            text: `[INSTRUCCIONES DEL SISTEMA DE CONTEXTO]\n${systemContent}`
+          });
+        }
+
+        finalMessages[firstUserIndex] = {
+          role: 'user',
+          content: updatedContent
+        };
+      }
+    }
+  }
+
   const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -131,7 +182,7 @@ async function tryGroq(unifiedMessages: any[], hasVision: boolean) {
     },
     body: JSON.stringify({
       model,
-      messages: unifiedMessages,
+      messages: finalMessages, 
       stream: true,
       temperature: hasVision ? 0.3 : 0.6,
     })
@@ -214,14 +265,13 @@ export async function POST(req: Request) {
     // Generamos la estructura limpia una sola vez para ambos motores
     const unifiedMessages = buildUnifiedMessages(cleanMessages);
 
-    // 1. Cascasa Primaria Inteligente: Gemini con interfaz nativa OpenAI Stream
+    // 1. Cascada Primaria Inteligente: Gemini con interfaz nativa OpenAI Stream
     for (const model of GEMINI_MODELS) {
       for (const apiKey of GEMINI_KEYS) {
         try {
           const geminiRes = await tryGeminiOpenAI(model, apiKey, unifiedMessages);
           if (!geminiRes.body) continue;
 
-          // Retornamos directamente el stream compatible sin procesamiento manual destructivo
           return new Response(geminiRes.body, {
             headers: {
               ...cors,
