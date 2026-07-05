@@ -52,7 +52,40 @@ REGLAS CRÍTICAS DE RESPUESTA Y LÍMITES COGNITIVOS:
 4. CAPACIDAD VISUAL Y DOCUMENTAL: ¡SÍ lees imágenes y documentos! Analiza gráficos de barras, embudos de conversión, capturas de dashboards de métricas, lienzos Canvas o diagramas de flujos comerciales. Procesa los datos de forma literal y precisa, identificando cuellos de botella reales y entregando un informe de consultoría táctico enfocado en viabilidad, mitigación de riesgos de mercado y monetización exponencial.
 `;
 
-const SYSTEM_PROMPT = BUSINESS_CONSULTANT_PROMPT || LOCAL_SYSTEM_PROMPT;
+/**
+ * FUNCIÓN DEFENSIVA: Extrae las propiedades del objeto de la factoría 
+ * y las une en un String Markdown limpio antes de enviarlo a las APIs.
+ */
+function resolveSystemPrompt(agentPrompt: any): string {
+  if (!agentPrompt) return LOCAL_SYSTEM_PROMPT;
+  if (typeof agentPrompt === 'string') return agentPrompt;
+
+  // Si la factoría expone un texto plano en alguna propiedad conocida
+  if (agentPrompt.prompt && typeof agentPrompt.prompt === 'string') return agentPrompt.prompt;
+  if (agentPrompt.text && typeof agentPrompt.text === 'string') return agentPrompt.text;
+
+  // Si es el objeto estructurado con la configuración, unificamos sus partes
+  if (typeof agentPrompt === 'object') {
+    const parts = [
+      agentPrompt.identityAndRole,
+      agentPrompt.mission,
+      agentPrompt.domainScope,
+      agentPrompt.boundariesAndDelegation,
+      agentPrompt.protocolSteps,
+      agentPrompt.qualityObjective,
+      agentPrompt.outputFormat
+    ].filter(Boolean); // Filtra propiedades vacías o undefined
+
+    if (parts.length > 0) {
+      return parts.join('\n\n');
+    }
+  }
+
+  return String(agentPrompt) || LOCAL_SYSTEM_PROMPT;
+}
+
+// CORRECCIÓN: Ahora SYSTEM_PROMPT procesa el objeto de manera segura y garantiza un String
+const SYSTEM_PROMPT = resolveSystemPrompt(BUSINESS_CONSULTANT_PROMPT);
 
 const GEMINI_KEYS = [
   process.env.GEMINI_API_KEY,
